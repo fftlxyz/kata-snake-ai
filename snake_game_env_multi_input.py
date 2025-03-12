@@ -16,12 +16,14 @@ class SnakeEnv(gym.Env):
 
         self.action_space = gym.spaces.Discrete(4)  # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
 
-        self.observation_space = gym.spaces.Box(
-            low=0, high=255,
-            # shape=(84, 84, 3),
-            shape=(3, 84, 84),
-            dtype=np.uint8
-        )
+        self.observation_space = gym.spaces.Dict({
+            # rgb 3 * 84 * 84, stable_baselines3.common.torch_layers.NatureCNN 的结构
+            "image": gym.spaces.Box(
+                low=0, high=255,
+                shape=(3, 84, 84),
+                dtype=np.uint8),
+            # 通过判断下一个snake head pos是否存在到snail tail的路径判断
+            "next_direction_safe": gym.spaces.MultiBinary(4)})
 
         self.board_size = board_size
         self.grid_size = board_size ** 2  # Max length of snake is board_size^2
@@ -50,14 +52,11 @@ class SnakeEnv(gym.Env):
             action)  # info = {"snake_size": int, "snake_head_pos": np.array, "prev_snake_head_pos": np.array, "food_pos": np.array, "food_obtained": bool}
         obs = self._generate_observation()
 
-        reward = 0.0
         self.reward_step_counter += 1
 
         if info["snake_size"] == self.grid_size:  # Snake fills up the entire board. Game over.
             reward = self.max_growth * 0.1  # Victory reward
             self.done = True
-            if not self.silent_mode:
-                self.game.sound_victory.play()
             return obs, reward, self.done, False, info
 
         if self.reward_step_counter > self.step_limit:  # Step limit reached, game over.
@@ -67,7 +66,7 @@ class SnakeEnv(gym.Env):
         if self.done:  # Snake bumps into wall or itself. Episode is over.
             # Game Over penalty is based on snake size.
             reward = - math.pow(self.max_growth, (
-                        self.grid_size - info["snake_size"]) / self.max_growth)  # (-max_growth, -1)
+                    self.grid_size - info["snake_size"]) / self.max_growth)  # (-max_growth, -1)
             reward = reward * 0.1
             return obs, reward, self.done, False, info
 
@@ -85,8 +84,12 @@ class SnakeEnv(gym.Env):
                 reward = - 1 / info["snake_size"]
             reward = reward * 0.1
 
-        # max_score: 72 + 14.1 = 86.1
-        # min_score: -14.1
+        # 如果snake头尾存在通路, reward加倍，惩罚减半, 不存在通路容易把自己搞死
+        if self._exist_way_from_pos_to_tail(self.game.snake[0]):
+            if reward > 0:
+                reward = reward * 2
+            else:
+                reward = reward / 2
 
         return obs, reward, self.done, False, info
 
@@ -152,65 +155,65 @@ class SnakeEnv(gym.Env):
     def _generate_observation(self):
 
         # revers the obs shape for easy access
-        obs = np.zeros(tuple(reversed(self.observation_space.shape)), dtype=np.uint8)
+        image_obs = np.zeros((84, 84, 3), dtype=np.uint8)
 
         # Set the snake body to gray with linearly decreasing intensity from head to tail.
-        obs[tuple(np.transpose(self.game.snake))] = [(i, i, i) for i in
-                                                     np.linspace(200, 50, len(self.game.snake), dtype=np.uint8)]
+        image_obs[tuple(np.transpose(self.game.snake))] = [(i, i, i) for i in
+                                                           np.linspace(200, 50, len(self.game.snake), dtype=np.uint8)]
 
         # Set the snake head to green and the tail to blue
-        obs[tuple(self.game.snake[0])] = [0, 255, 0]
-        obs[tuple(self.game.snake[-1])] = [255, 0, 0]
+        image_obs[tuple(self.game.snake[0])] = [0, 255, 0]
+        image_obs[tuple(self.game.snake[-1])] = [255, 0, 0]
 
         # Set the food to red
-        obs[self.game.food] = [0, 0, 255]
+        image_obs[self.game.food] = [0, 0, 255]
 
-        # return a (3, 84, 84) obs
-        return np.transpose(obs, (2, 0, 1))
-# Test the environment using random actions
-# NUM_EPISODES = 100
-# RENDER_DELAY = 0.001
-# from matplotlib import pyplot as plt
+        # return a (3, 84, 84) image obs
+        image_obs = np.transpose(image_obs, (2, 0, 1))
 
-# if __name__ == "__main__":
-#     env = SnakeEnv(silent_mode=False)
+        next_direction_safe = self._check_next_direction_safe()
 
-# # Test Init Efficiency
-# print(MODEL_PATH_S)
-# print(MODEL_PATH_L)
-# num_success = 0
-# for i in range(NUM_EPISODES):
-#     num_success += env.reset()
-# print(f"Success rate: {num_success/NUM_EPISODES}")
+        return {
+            "image": image_obs,
+            "next_direction_safe": next_direction_safe
+        }
 
-# sum_reward = 0
+    def _check_next_direction_safe(self):
 
-# # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
-# action_list = [1, 1, 1, 0, 0, 0, 2, 2, 2, 3, 3, 3]
+        next_direction_safe = [0, 0, 0, 0]
 
-# for _ in range(NUM_EPISODES):
-#     obs = env.reset()
-#     done = False
-#     i = 0
-#     while not done:
-#         plt.imshow(obs, interpolation='nearest')
-#         plt.show()
-#         action = env.action_space.sample()
-#         # action = action_list[i]
-#         i = (i + 1) % len(action_list)
-#         obs, reward, done, info = env.step(action)
-#         sum_reward += reward
-#         if np.absolute(reward) > 0.001:
-#             print(reward)
-#         env.render()
+        # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
+        direction = [(-1, 0), (0, -1), (0, 1), (1, 0)]
 
-#         time.sleep(RENDER_DELAY)
-#     # print(info["snake_length"])
-#     # print(info["food_pos"])
-#     # print(obs)
-#     print("sum_reward: %f" % sum_reward)
-#     print("episode done")
-#     # time.sleep(100)
+        for i in range(0, 4):
+            if not self._check_action_validity(i):
+                continue
+            row, col = self.game.snake[0]
+            if self._exist_way_from_pos_to_tail((row + direction[i][0], col + direction[i][1])):
+                next_direction_safe[i] = 1
 
-# env.close()
-# print("Average episode reward for random strategy: {}".format(sum_reward/NUM_EPISODES))
+        return next_direction_safe
+
+    def _exist_way_from_pos_to_tail(self, head_pos):
+
+        visited = np.zeros((self.board_size, self.board_size), dtype=np.uint8)
+        visited[tuple(np.transpose(self.game.snake))] = 1
+        visited[head_pos] = 1
+        visited[self.game.snake[-1]] = 0
+
+        return self._do_exists_way_from_pos_to_tail(head_pos, visited)
+
+    def _do_exists_way_from_pos_to_tail(self, pos, visited):
+
+        if pos == self.game.snake[-1]:
+            return True
+
+        for direction in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            next_pos = (pos[0] + direction[0], pos[1] + direction[1])
+            if 0 <= next_pos[0] < self.board_size \
+                    and 0 <= next_pos[1] < self.board_size \
+                    and visited[next_pos] == 0:
+                visited[next_pos] = 1
+                if self._do_exists_way_from_pos_to_tail(next_pos, visited):
+                    return True
+        return False

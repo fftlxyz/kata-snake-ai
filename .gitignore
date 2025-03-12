@@ -1,5 +1,6 @@
 /logs/
 /venv
-/trained_models_cnn
+/trained_models/*steps.zip
 /.idea
 /__pycache__/
+.DS_Store

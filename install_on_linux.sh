@@ -1,7 +1,7 @@
 
 # Python 3.10.12
 python -m venv venv
-source .venv/bin/activate
+source ./venv/bin/activate
 
 # install package from requirements-linux.txt
 # or just installed the latest version it should work...

@@ -7,7 +7,7 @@ from snake_game_env_multi_input import SnakeEnv
 
 
 MODEL_PATH = r"trained_models/ppo_snake_final.zip"
-NUM_EPISODE = 10
+NUM_EPISODE = 30
 
 RENDER = False
 FRAME_DELAY = 0.05 # 0.01 fast, 0.05 slow

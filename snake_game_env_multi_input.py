@@ -1,4 +1,5 @@
 import math
+from collections import deque
 
 import gymnasium as gym
 import numpy as np
@@ -13,6 +14,8 @@ class SnakeEnv(gym.Env):
         self.game.reset()
 
         self.silent_mode = silent_mode
+        self.board_size = board_size
+        self.grid_size = board_size ** 2  # Max length of snake is board_size^2
 
         self.action_space = gym.spaces.Discrete(4)  # 0: UP, 1: LEFT, 2: RIGHT, 3: DOWN
 
@@ -23,10 +26,8 @@ class SnakeEnv(gym.Env):
                 shape=(3, 84, 84),
                 dtype=np.uint8),
             # 通过判断下一个snake head pos是否存在到snail tail的路径判断
-            "next_direction_safe": gym.spaces.MultiBinary(4)})
+            "next_direction_safe": gym.spaces.MultiDiscrete([3, 3, 3, 3])})
 
-        self.board_size = board_size
-        self.grid_size = board_size ** 2  # Max length of snake is board_size^2
         self.init_snake_size = len(self.game.snake)
         self.max_growth = self.grid_size - self.init_snake_size
 
@@ -85,11 +86,17 @@ class SnakeEnv(gym.Env):
             reward = reward * 0.1
 
         # 如果snake头尾存在通路, reward加倍，惩罚减半, 不存在通路容易把自己搞死
-        if self._exist_way_from_pos_to_tail(self.game.snake[0]):
+        # 存在通路，且长度越长奖励越多，避免离的太近导致有些果子吃不到
+        shortest_path_len = self._shortest_path_len_head_to_tail()
+        if shortest_path_len > 0:
+            # 玄学，奖励系数
+            extra_reward_coff = 1.5
+            if shortest_path_len > 3:
+                extra_reward_coff = 2
             if reward > 0:
-                reward = reward * 2
+                reward = reward * extra_reward_coff
             else:
-                reward = reward / 2
+                reward = reward / extra_reward_coff
 
         return obs, reward, self.done, False, info
 
@@ -189,31 +196,54 @@ class SnakeEnv(gym.Env):
             if not self._check_action_validity(i):
                 continue
             row, col = self.game.snake[0]
-            if self._exist_way_from_pos_to_tail((row + direction[i][0], col + direction[i][1])):
+            shortest_path_len = self._shortest_path_len_next_head_to_tail(
+                (row + direction[i][0], col + direction[i][1]))
+            if 1 <= shortest_path_len <= 3:
                 next_direction_safe[i] = 1
-
+            elif shortest_path_len > 3:
+                next_direction_safe[i] = 2
         return next_direction_safe
 
-    def _exist_way_from_pos_to_tail(self, head_pos):
+    def _shortest_path_len_head_to_tail(self):
 
         visited = np.zeros((self.board_size, self.board_size), dtype=np.uint8)
         visited[tuple(np.transpose(self.game.snake))] = 1
-        visited[head_pos] = 1
         visited[self.game.snake[-1]] = 0
+        return self._shortest_path_len_from_a_to_b(self.game.snake[0], self.game.snake[-1], visited)
 
-        return self._do_exists_way_from_pos_to_tail(head_pos, visited)
+    def _shortest_path_len_next_head_to_tail(self, next_head_pos):
 
-    def _do_exists_way_from_pos_to_tail(self, pos, visited):
+        visited = np.zeros((self.board_size, self.board_size), dtype=np.uint8)
+        visited[tuple(np.transpose(self.game.snake))] = 1
 
-        if pos == self.game.snake[-1]:
-            return True
+        # 新的尾巴位置和是否碰到food有关
+        if self.game.food == next_head_pos:
+            visited[self.game.snake[-1]] = 0
+            visited[next_head_pos] = 1
+            return self._shortest_path_len_from_a_to_b(next_head_pos, self.game.snake[-1], visited)
+        else:
+            visited[self.game.snake[-1]] = 0
+            visited[self.game.snake[-2]] = 0
+            visited[next_head_pos] = 1
+            return self._shortest_path_len_from_a_to_b(next_head_pos, self.game.snake[-2], visited)
 
-        for direction in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            next_pos = (pos[0] + direction[0], pos[1] + direction[1])
-            if 0 <= next_pos[0] < self.board_size \
-                    and 0 <= next_pos[1] < self.board_size \
-                    and visited[next_pos] == 0:
-                visited[next_pos] = 1
-                if self._do_exists_way_from_pos_to_tail(next_pos, visited):
-                    return True
-        return False
+    # bfs判断最短路径, level就是最短路径长度
+    def _shortest_path_len_from_a_to_b(self, pos_a, pos_b, visited):
+        queue = deque([pos_a])  # 使用队列存储待访问的节点
+        level = 0
+        while queue:
+            level_size = len(queue)  # 当前层的节点数量
+            for _ in range(level_size):
+                current_pos = queue.popleft()  # 取出当前层的节点
+                if current_pos == pos_b:
+                    return level
+                # 可能去的地方
+                for direction in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    next_pos = (current_pos[0] + direction[0], current_pos[1] + direction[1])
+                    if 0 <= next_pos[0] < self.board_size \
+                            and 0 <= next_pos[1] < self.board_size \
+                            and visited[next_pos] == 0:
+                        visited[next_pos] = 1
+                        queue.append(next_pos)
+            level += 1  # 层 数加1
+        return -1

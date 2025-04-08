@@ -41,5 +41,5 @@ Episode 30: Reward Sum: 138.8079, Score: 1390, Total Steps: 3468, Snake Size: 14
 
 ### 训练、测试
 
-1. 参考install_on_linux.sh、install_on_mac.sh 安装相关以来
+1. 参考install_on_linux.sh、install_on_mac.sh 安装相关以来， 仅在python3.10 版本下测试过。
 2. 直接运行train_multi_input.py或test_multi_input.py即可。
